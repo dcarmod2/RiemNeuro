@@ -5,6 +5,7 @@ import os
 import random
 import pyriemann
 import re
+import itertools
 
 from sklearn.model_selection import cross_val_score
 from sklearn.model_selection import train_test_split
@@ -171,7 +172,25 @@ class to_symm_mat(BaseEstimator, TransformerMixin):
         return np.array(to_ret)
 
 
-def permutation_bootstrap(samples,labels,n_states,p=5):
+def get_sig_pairs(coeffarr,nullcoeffs,num_pairs,p,rois,maxmin="max"):
+    def ind_to_pair(ind):
+        x,y = np.triu_indices(33)
+        return (x[ind],y[ind])
+    if maxmin == "max":
+        percentile = 100-p
+    elif maxmin == "min":
+        percentile = p
+    thresholds = np.percentile(nullcoeffs,percentile,axis=0)
+    if maxmin == "max":
+        boolarr =  coeffarr > thresholds.reshape(num_pairs,1)
+    elif maxmin == "min":
+        boolarr = coeffarr < thresholds.reshape(num_pairs,1)
+    indarr = [[(rois[ind_to_pair(i)[0]],rois[ind_to_pair(i)[1]]) 
+     for i in range(0,len(boolarr[0])) if boolarr[j][i]] for j in range(0,len(boolarr))]
+    return indarr,boolarr
+
+
+def permutation_bootstrap(samples,labels,n_states,rois,p=5):
     '''
     Perform permutation bootstrap to find discriminative connections.
     
@@ -237,17 +256,17 @@ def permutation_bootstrap(samples,labels,n_states,p=5):
         coeffArr.append(clf_riem[4].coef_/np.std(clf_riem[4].coef_,axis=-1).reshape(num_pairs,1))
     meancoeff = sum(coeffArr)/len(coeffArr)
 
-    sig_pairs_max = get_sig_pairs(meancoeff,maxcoeffs,n_states,p,"max")
-    sig_pairs_min = get_sig_pairs(meancoeff,mincoeffs,n_states,p,"min")
+    sig_pairs_max, boolarr_max = get_sig_pairs(meancoeff,maxcoeffs,num_pairs,p,rois,"max")
+    sig_pairs_min, boolarr_min = get_sig_pairs(meancoeff,mincoeffs,num_pairs,p,rois,"min")
     
     combs = list(itertools.combinations(range(0,n_states),2))
-    discrim_conn_max = [[combs[z] for z,flag in enumerate(one_vs_one_conns) if flag] for one_vs_one_conns in sig_pairs_max]
-    discrim_conn_min = [[combs[z] for z,flag in enumerate(one_vs_one_conns) if flag] for one_vs_one_conns in sig_pairs_min]
+    #discrim_conn_max = [[combs[z] for z,flag in enumerate(one_vs_one_conns) if flag] for one_vs_one_conns in boolarr_max]
+    #discrim_conn_min = [[combs[z] for z,flag in enumerate(one_vs_one_conns) if flag] for one_vs_one_conns in boolarr_min]
 
     
-    return discrim_conn_max, discrim_conn_min
+    return sig_pairs_max, sig_pairs_min
 
-def generate_test(n_samples = 200,n_vars=500,n_channels = 5,n_states=3,correlated_inds = [[0,1],[0,2],[0,3]]):
+def generate_test(n_samples = 200,n_vars=500,n_channels = 5,n_states=3,rois = [0,1,2,3,4], correlated_inds = [[0,1],[0,2],[0,3]]):
     '''
     Produces test data and tests whether projecting matrices into the tangent space finds the correct discriminative connection.
     
@@ -285,7 +304,7 @@ def generate_test(n_samples = 200,n_vars=500,n_channels = 5,n_states=3,correlate
     
     samples = np.array(samples)
     labels = np.array(labels)
-    return samples,labels,permutation_bootstrap(samples,labels,n_states,5)
+    return samples,labels,permutation_bootstrap(samples,labels,n_states,rois=rois,p=5)
 
 def train_classifiers(data_files,valid_runs_dict_uiuc,valid_runs_dict_whasc):
     '''
